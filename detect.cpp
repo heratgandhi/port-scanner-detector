@@ -22,6 +22,7 @@ struct stat
 	int syn;
 	int rst;
 	int ack;
+	int fin;
 };
 
 struct substorage
@@ -45,7 +46,8 @@ int tcp=0,others=0,total=0,i,j;
 map<string, storage> logger;
 string key;
 stat temp;
-int opp_port,my_port;
+int opp,mine;
+int syn,rst,ack,fin;
  
 int main()
 {
@@ -80,7 +82,21 @@ int main()
 
 	for( map<string, storage>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
 	{
-		cout << (*ii).first << ": " << endl;
+		key = (*ii).first;
+		cout << key << endl;
+		for( map<int, substorage>::iterator jj=logger[key].opp_port.begin(); jj!=logger[key].opp_port.end(); ++jj)
+		{
+			opp = (*jj).first;
+			cout << "  " << opp << endl;
+			for( map<int, stat>::iterator kk=logger[key].opp_port[opp].my_port.begin(); kk!=logger[key].opp_port[opp].my_port.end(); ++kk)
+			{
+				mine = (*kk).first;
+				cout << "   " << logger[key].opp_port[opp].my_port[mine].ack << " " <<
+						logger[key].opp_port[opp].my_port[mine].fin << " " <<
+						logger[key].opp_port[opp].my_port[mine].rst << " " <<
+						logger[key].opp_port[opp].my_port[mine].syn << endl;
+			}
+		}
 	}
 
     return 0;
@@ -169,28 +185,62 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     if(strcmp(inet_ntoa(source.sin_addr),MY_IP) == 0)
     {
     	key = inet_ntoa(dest.sin_addr);
-    	opp_port = ntohs(tcph->dest);
-    	my_port = ntohs(tcph->source);
+    	opp = ntohs(tcph->dest);
+    	mine = ntohs(tcph->source);
     }
     else
     {
     	key = inet_ntoa(source.sin_addr);
-    	opp_port = ntohs(tcph->source);
-		my_port = ntohs(tcph->dest);
+    	opp = ntohs(tcph->source);
+		mine = ntohs(tcph->dest);
     }
-    cout << key << " " << opp_port << " " << my_port << endl;
 
-	/*if ( logger.find(key) == logger.end() )
-	{
-		// not found
-		//temp[ntohs(tcph->dest)] = ;
-		logger[key].src_port = ntohs(tcph->source);
-	}
-	else
-	{
-		// found
-		//temp.des_port = ntohs(tcph->dest);
-		logger[key].src_port = ntohs(tcph->source);
-	}*/
+    syn = (unsigned int)tcph->syn;
+    rst = (unsigned int)tcph->rst;
+    fin = (unsigned int)tcph->fin;
+    ack = (unsigned int)tcph->ack;
 
+    if(logger.find(key) == logger.end())
+    {
+    	//not found key
+    	temp.ack = ack;
+    	temp.rst = rst;
+    	temp.fin = fin;
+    	temp.syn = syn;
+    	logger[key].opp_port[opp].my_port[mine] = temp;
+    }
+    else
+    {
+    	//found key
+    	if(logger[key].opp_port.find(opp) == logger[key].opp_port.end())
+    	{
+    		//not found opp
+    		temp.ack = ack;
+			temp.rst = rst;
+			temp.fin = fin;
+			temp.syn = syn;
+    		logger[key].opp_port[opp].my_port[mine] = temp;
+    	}
+    	else
+    	{
+    		//found opp
+    		if(logger[key].opp_port[opp].my_port.find(mine) == logger[key].opp_port[opp].my_port.end())
+    		{
+    			//not found mine
+    			temp.ack = ack;
+				temp.rst = rst;
+    			temp.fin = fin;
+				temp.syn = syn;
+				logger[key].opp_port[opp].my_port[mine] = temp;
+    		}
+    		else
+    		{
+    			//found mine
+				logger[key].opp_port[opp].my_port[mine].ack += ack;
+				logger[key].opp_port[opp].my_port[mine].rst += rst;
+				logger[key].opp_port[opp].my_port[mine].fin += fin;
+				logger[key].opp_port[opp].my_port[mine].syn += syn;
+    		}
+    	}
+    }
 }
