@@ -62,7 +62,7 @@ int main()
     //Open the device for sniffing
     printf("Opening device %s for sniffing ... " , devname);
     //handle = pcap_open_live(devname , 65536 , 1 , 0 , errbuf);
-    handle = pcap_open_offline("test1.pcap",errbuf);
+    handle = pcap_open_offline("test.pcap",errbuf);
      
     if (handle == NULL) 
     {
@@ -91,14 +91,14 @@ int main()
 			for( map<int, stat>::iterator kk=logger[key].opp_port[opp].my_port.begin(); kk!=logger[key].opp_port[opp].my_port.end(); ++kk)
 			{
 				mine = (*kk).first;
-				cout << "   " << logger[key].opp_port[opp].my_port[mine].ack << " " <<
+				cout << "  " << mine << endl;
+				cout << "    " << logger[key].opp_port[opp].my_port[mine].ack << " " <<
 						logger[key].opp_port[opp].my_port[mine].fin << " " <<
 						logger[key].opp_port[opp].my_port[mine].rst << " " <<
 						logger[key].opp_port[opp].my_port[mine].syn << endl;
 			}
 		}
 	}
-
     return 0;
 }
  
