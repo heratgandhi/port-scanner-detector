@@ -182,17 +182,17 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 
     fprintf(logfile , "\n###########################################################");*/
 
-    if(strcmp(inet_ntoa(source.sin_addr),MY_IP) == 0)
+    if(strcmp(inet_ntoa(dest.sin_addr),MY_IP) == 0)
     {
-    	key = inet_ntoa(dest.sin_addr);
-    	opp = ntohs(tcph->dest);
-    	mine = ntohs(tcph->source);
+    	key = inet_ntoa(source.sin_addr);
+		opp = ntohs(tcph->source);
+		mine = ntohs(tcph->dest);
     }
     else
     {
-    	key = inet_ntoa(source.sin_addr);
-    	opp = ntohs(tcph->source);
-		mine = ntohs(tcph->dest);
+    	key = inet_ntoa(dest.sin_addr);
+		opp = ntohs(tcph->dest);
+		mine = ntohs(tcph->source);
     }
 
     syn = (unsigned int)tcph->syn;
@@ -214,7 +214,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     	//found key
     	if(logger[key].opp_port.find(opp) == logger[key].opp_port.end())
     	{
-    		//not found opp
+    		//not found opp port
     		temp.ack = ack;
 			temp.rst = rst;
 			temp.fin = fin;
@@ -223,10 +223,10 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     	}
     	else
     	{
-    		//found opp
+    		//found opp port
     		if(logger[key].opp_port[opp].my_port.find(mine) == logger[key].opp_port[opp].my_port.end())
     		{
-    			//not found mine
+    			//not found mine port
     			temp.ack = ack;
 				temp.rst = rst;
     			temp.fin = fin;
@@ -235,7 +235,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     		}
     		else
     		{
-    			//found mine
+    			//found mine port
 				logger[key].opp_port[opp].my_port[mine].ack += ack;
 				logger[key].opp_port[opp].my_port[mine].rst += rst;
 				logger[key].opp_port[opp].my_port[mine].fin += fin;
