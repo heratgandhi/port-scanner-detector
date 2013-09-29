@@ -1,0 +1,1 @@
+detect.d: ../detect.cpp

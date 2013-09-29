@@ -1,27 +1,38 @@
-#include<pcap.h>
-#include<stdio.h>
-#include<stdlib.h> // for exit()
-#include<string.h> //for memset
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>         //for exit()
+#include <string.h>         //for memset
  
-#include<sys/socket.h>
-#include<arpa/inet.h> // for inet_ntoa()
-#include<net/ethernet.h>
-#include<netinet/ip_icmp.h>   //Provides declarations for icmp header
-#include<netinet/udp.h>   //Provides declarations for udp header
-#include<netinet/tcp.h>   //Provides declarations for tcp header
-#include<netinet/ip.h>    //Provides declarations for ip header
+#include <sys/socket.h>
+#include <arpa/inet.h>      //for inet_ntoa()
+#include <net/ethernet.h>
+#include <netinet/tcp.h>    //Provides declarations for tcp header
+#include <netinet/ip.h>     //Provides declarations for ip header
+
+#include <map>
+#include <utility>
+#include <iostream>
+
+using namespace std;
+
+struct cmp_str 
+{
+   bool operator()(char const *a, char const *b) 
+   {
+      return strcmp(a, b) < 0;
+   }
+};
  
 void process_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
 void process_ip_packet(const u_char * , int);
 void print_ip_packet(const u_char * , int);
 void print_tcp_packet(const u_char *  , int );
-void print_udp_packet(const u_char * , int);
-void print_icmp_packet(const u_char * , int );
 void PrintData (const u_char * , int);
  
 FILE *logfile;
 struct sockaddr_in source,dest;
-int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j; 
+int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
+map<char *, int, cmp_str> logger;
  
 int main()
 {
@@ -31,30 +42,6 @@ int main()
     char errbuf[100] , *devname , devs[100][100];
     int count = 1 , n;
      
-    //First get the list of available devices
-    printf("Finding available devices ... ");
-    if( pcap_findalldevs( &alldevsp , errbuf) )
-    {
-        printf("Error finding devices : %s" , errbuf);
-        exit(1);
-    }
-    printf("Done");
-     
-    //Print the available devices
-    printf("\nAvailable Devices are :\n");
-    for(device = alldevsp ; device != NULL ; device = device->next)
-    {
-        printf("%d. %s - %s\n" , count , device->name , device->description);
-        if(device->name != NULL)
-        {
-            strcpy(devs[count] , device->name);
-        }
-        count++;
-    }
-     
-    //Ask user which device to sniff
-    printf("Enter the number of the device you want to sniff : ");
-    scanf("%d" , &n);
     devname = "eth0";
      
     //Open the device for sniffing
@@ -77,8 +64,13 @@ int main()
      
     //Put the device in sniff loop
     pcap_loop(handle , -1 , process_packet , NULL);
-     
-    return 0;   
+
+	for( map<char *, int, cmp_str>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
+	{
+	   cout << (*ii).first << ": " << (*ii).second << endl;
+	}
+
+    return 0;
 }
  
 void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *buffer)
@@ -92,7 +84,6 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     {
         case 1:  //ICMP Protocol
             ++icmp;
-            print_icmp_packet( buffer , size);
             break;
          
         case 2:  //IGMP Protocol
@@ -106,7 +97,6 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
          
         case 17: //UDP Protocol
             ++udp;
-            print_udp_packet(buffer , size);
             break;
          
         default: //Some Other Protocol like ARP etc.
@@ -157,6 +147,14 @@ void print_ip_header(const u_char * Buffer, int Size)
     fprintf(logfile , "   |-Checksum : %d\n",ntohs(iph->check));
     fprintf(logfile , "   |-Source IP        : %s\n" , inet_ntoa(source.sin_addr) );
     fprintf(logfile , "   |-Destination IP   : %s\n" , inet_ntoa(dest.sin_addr) );
+
+    if ( logger.find(inet_ntoa(source.sin_addr)) == logger.end() ) {
+    	// not found
+    	logger[inet_ntoa(source.sin_addr)] = 0;
+    } else {
+    	// found
+    	logger[inet_ntoa(source.sin_addr)] += 1;
+    }
 }
  
 void print_tcp_packet(const u_char * Buffer, int Size)
@@ -196,101 +194,15 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     fprintf(logfile , "                        DATA Dump                         ");
     fprintf(logfile , "\n");
          
-    fprintf(logfile , "IP Header\n");
-    PrintData(Buffer,iphdrlen);
+    //fprintf(logfile , "IP Header\n");
+    //PrintData(Buffer,iphdrlen);
          
-    fprintf(logfile , "TCP Header\n");
-    PrintData(Buffer+iphdrlen,tcph->doff*4);
+    //fprintf(logfile , "TCP Header\n");
+    //PrintData(Buffer+iphdrlen,tcph->doff*4);
          
-    fprintf(logfile , "Data Payload\n");    
-    PrintData(Buffer + header_size , Size - header_size );
+    //fprintf(logfile , "Data Payload\n");    
+    //PrintData(Buffer + header_size , Size - header_size );
                          
-    fprintf(logfile , "\n###########################################################");
-}
- 
-void print_udp_packet(const u_char *Buffer , int Size)
-{
-     
-    unsigned short iphdrlen;
-     
-    struct iphdr *iph = (struct iphdr *)(Buffer +  sizeof(struct ethhdr));
-    iphdrlen = iph->ihl*4;
-     
-    struct udphdr *udph = (struct udphdr*)(Buffer + iphdrlen  + sizeof(struct ethhdr));
-     
-    int header_size =  sizeof(struct ethhdr) + iphdrlen + sizeof udph;
-     
-    fprintf(logfile , "\n\n***********************UDP Packet*************************\n");
-     
-    print_ip_header(Buffer,Size);           
-     
-    fprintf(logfile , "\nUDP Header\n");
-    fprintf(logfile , "   |-Source Port      : %d\n" , ntohs(udph->source));
-    fprintf(logfile , "   |-Destination Port : %d\n" , ntohs(udph->dest));
-    fprintf(logfile , "   |-UDP Length       : %d\n" , ntohs(udph->len));
-    fprintf(logfile , "   |-UDP Checksum     : %d\n" , ntohs(udph->check));
-     
-    fprintf(logfile , "\n");
-    fprintf(logfile , "IP Header\n");
-    PrintData(Buffer , iphdrlen);
-         
-    fprintf(logfile , "UDP Header\n");
-    PrintData(Buffer+iphdrlen , sizeof udph);
-         
-    fprintf(logfile , "Data Payload\n");    
-     
-    //Move the pointer ahead and reduce the size of string
-    PrintData(Buffer + header_size , Size - header_size);
-     
-    fprintf(logfile , "\n###########################################################");
-}
- 
-void print_icmp_packet(const u_char * Buffer , int Size)
-{
-    unsigned short iphdrlen;
-     
-    struct iphdr *iph = (struct iphdr *)(Buffer  + sizeof(struct ethhdr));
-    iphdrlen = iph->ihl * 4;
-     
-    struct icmphdr *icmph = (struct icmphdr *)(Buffer + iphdrlen  + sizeof(struct ethhdr));
-     
-    int header_size =  sizeof(struct ethhdr) + iphdrlen + sizeof icmph;
-     
-    fprintf(logfile , "\n\n***********************ICMP Packet*************************\n"); 
-     
-    print_ip_header(Buffer , Size);
-             
-    fprintf(logfile , "\n");
-         
-    fprintf(logfile , "ICMP Header\n");
-    fprintf(logfile , "   |-Type : %d",(unsigned int)(icmph->type));
-             
-    if((unsigned int)(icmph->type) == 11)
-    {
-        fprintf(logfile , "  (TTL Expired)\n");
-    }
-    else if((unsigned int)(icmph->type) == ICMP_ECHOREPLY)
-    {
-        fprintf(logfile , "  (ICMP Echo Reply)\n");
-    }
-     
-    fprintf(logfile , "   |-Code : %d\n",(unsigned int)(icmph->code));
-    fprintf(logfile , "   |-Checksum : %d\n",ntohs(icmph->checksum));
-    //fprintf(logfile , "   |-ID       : %d\n",ntohs(icmph->id));
-    //fprintf(logfile , "   |-Sequence : %d\n",ntohs(icmph->sequence));
-    fprintf(logfile , "\n");
- 
-    fprintf(logfile , "IP Header\n");
-    PrintData(Buffer,iphdrlen);
-         
-    fprintf(logfile , "UDP Header\n");
-    PrintData(Buffer + iphdrlen , sizeof icmph);
-         
-    fprintf(logfile , "Data Payload\n");    
-     
-    //Move the pointer ahead and reduce the size of string
-    PrintData(Buffer + header_size , (Size - header_size) );
-     
     fprintf(logfile , "\n###########################################################");
 }
  
