@@ -15,12 +15,23 @@
 
 using namespace std;
 
-struct cmp_str 
+#define MY_IP "192.168.48.146"
+
+struct stat
 {
-   bool operator()(char const *a, char const *b) 
-   {
-      return strcmp(a, b) < 0;
-   }
+	int syn;
+	int rst;
+	int ack;
+};
+
+struct substorage
+{
+	map<int,stat> my_port;
+};
+
+struct storage
+{
+	map<int,substorage> opp_port;
 };
  
 void process_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
@@ -30,15 +41,18 @@ void PrintData (const u_char * , int);
  
 FILE *logfile;
 struct sockaddr_in source,dest;
-int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
-map<char *, int, cmp_str> logger;
+int tcp=0,others=0,total=0,i,j;
+map<string, storage> logger;
+string key;
+stat temp;
+int opp_port,my_port;
  
 int main()
 {
     pcap_if_t *alldevsp , *device;
     pcap_t *handle; //Handle of the device that shall be sniffed
  
-    char errbuf[100] , *devname , devs[100][100];
+    char errbuf[100] , *devname;
     int count = 1 , n;
      
     devname = "eth0";
@@ -46,7 +60,7 @@ int main()
     //Open the device for sniffing
     printf("Opening device %s for sniffing ... " , devname);
     //handle = pcap_open_live(devname , 65536 , 1 , 0 , errbuf);
-    handle = pcap_open_offline("test.pcap",errbuf);
+    handle = pcap_open_offline("test1.pcap",errbuf);
      
     if (handle == NULL) 
     {
@@ -64,9 +78,9 @@ int main()
     //Put the device in sniff loop
     pcap_loop(handle , -1 , process_packet , NULL);
 
-	for( map<char *, int, cmp_str>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
+	for( map<string, storage>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
 	{
-	   cout << (*ii).first << ": " << (*ii).second << endl;
+		cout << (*ii).first << ": " << endl;
 	}
 
     return 0;
@@ -81,21 +95,9 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     ++total;
     switch (iph->protocol) //Check the Protocol and do accordingly...
     {
-        case 1:  //ICMP Protocol
-            ++icmp;
-            break;
-         
-        case 2:  //IGMP Protocol
-            ++igmp;
-            break;
-         
         case 6:  //TCP Protocol
             ++tcp;
             print_tcp_packet(buffer , size);
-            break;
-         
-        case 17: //UDP Protocol
-            ++udp;
             break;
          
         default: //Some Other Protocol like ARP etc.
@@ -103,33 +105,28 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
             break;
     }
 }
- 
+
 void print_tcp_packet(const u_char * Buffer, int Size)
 {
     unsigned short iphdrlen;
-     
     struct iphdr *iph = (struct iphdr *)( Buffer  + sizeof(struct ethhdr) );
     iphdrlen = iph->ihl*4;
-     
     struct tcphdr *tcph=(struct tcphdr*)(Buffer + iphdrlen + sizeof(struct ethhdr));
-             
     int header_size =  sizeof(struct ethhdr) + iphdrlen + tcph->doff*4;
-     
-    fprintf(logfile , "\n\n***********************TCP Packet*************************\n");  
-
     struct ethhdr *eth = (struct ethhdr *)Buffer;
-         
+
+    memset(&source, 0, sizeof(source));
+	source.sin_addr.s_addr = iph->saddr;
+
+	memset(&dest, 0, sizeof(dest));
+	dest.sin_addr.s_addr = iph->daddr;
+
+	/*fprintf(logfile , "\n\n***********************TCP Packet*************************\n");
 	fprintf(logfile , "\n");
 	fprintf(logfile , "Ethernet Header\n");
 	fprintf(logfile , "   |-Destination Address : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
 	fprintf(logfile , "   |-Source Address      : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_source[0] , eth->h_source[1] , eth->h_source[2] , eth->h_source[3] , eth->h_source[4] , eth->h_source[5] );
 	fprintf(logfile , "   |-Protocol            : %u \n",(unsigned short)eth->h_proto);
-
-	memset(&source, 0, sizeof(source));
-	source.sin_addr.s_addr = iph->saddr;
-
-	memset(&dest, 0, sizeof(dest));
-	dest.sin_addr.s_addr = iph->daddr;
 
 	fprintf(logfile , "\n");
 	fprintf(logfile , "IP Header\n");
@@ -147,15 +144,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 	fprintf(logfile , "   |-Source IP        : %s\n" , inet_ntoa(source.sin_addr) );
 	fprintf(logfile , "   |-Destination IP   : %s\n" , inet_ntoa(dest.sin_addr) );
 
-	if ( logger.find(inet_ntoa(source.sin_addr)) == logger.end() ) {
-		// not found
-		logger[inet_ntoa(source.sin_addr)] = 0;
-	} else {
-		// found
-		logger[inet_ntoa(source.sin_addr)] += 1;
-	}
-         
-    fprintf(logfile , "\n");
+	fprintf(logfile , "\n");
     fprintf(logfile , "TCP Header\n");
     fprintf(logfile , "   |-Source Port      : %u\n",ntohs(tcph->source));
     fprintf(logfile , "   |-Destination Port : %u\n",ntohs(tcph->dest));
@@ -174,8 +163,34 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     fprintf(logfile , "   |-Checksum       : %d\n",ntohs(tcph->check));
     fprintf(logfile , "   |-Urgent Pointer : %d\n",tcph->urg_ptr);
     fprintf(logfile , "\n");
-    fprintf(logfile , "                        DATA Dump                         ");
-    fprintf(logfile , "\n");
-         
-    fprintf(logfile , "\n###########################################################");
+
+    fprintf(logfile , "\n###########################################################");*/
+
+    if(strcmp(inet_ntoa(source.sin_addr),MY_IP) == 0)
+    {
+    	key = inet_ntoa(dest.sin_addr);
+    	opp_port = ntohs(tcph->dest);
+    	my_port = ntohs(tcph->source);
+    }
+    else
+    {
+    	key = inet_ntoa(source.sin_addr);
+    	opp_port = ntohs(tcph->source);
+		my_port = ntohs(tcph->dest);
+    }
+    cout << key << " " << opp_port << " " << my_port << endl;
+
+	/*if ( logger.find(key) == logger.end() )
+	{
+		// not found
+		//temp[ntohs(tcph->dest)] = ;
+		logger[key].src_port = ntohs(tcph->source);
+	}
+	else
+	{
+		// found
+		//temp.des_port = ntohs(tcph->dest);
+		logger[key].src_port = ntohs(tcph->source);
+	}*/
+
 }
