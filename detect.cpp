@@ -1,6 +1,11 @@
-#include <pcap.h>
+/*
+ * Author: Herat Gandhi (hag59)
+ * Programs: This program detects TCP port scanning from other
+ * hosts on a particular host.
+ */
 #include <stdio.h>
 #include <stdlib.h>
+#include <pcap.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/tcp.h>
@@ -10,17 +15,18 @@
 #include <map>
 #include <utility>
 #include <iostream>
-#include <time.h>
 
 using namespace std;
 
 #define THRESHOLD 10
 
+//Structure to keep track of TCP state per IP, per port
 struct stat
 {
 	int state;
 };
 
+//Structure to keep track of TCP state per IP
 struct storage
 {
 	int full_open;
@@ -30,9 +36,12 @@ struct storage
 	int syn_counts;
 	map<int,stat> port;
 };
+//Main data structure in which all the events are logged.
+map<string, storage> logger;
 
-void process_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
-void print_tcp_packet(const u_char *  , int );
+void process_packet(u_char *, const struct pcap_pkthdr *,
+		const u_char *);
+void process_tcp_packet(const u_char *  , int );
 
 struct sockaddr_in source,dest;
 int tcp=0,others=0,total=0,i,j;
@@ -40,263 +49,282 @@ string key;
 int key1;
 stat temp;
 int syn,rst,ack,fin;
-
 string myip = "192.168.48.146";
-
-map<string, storage> logger;
  
 int main(int argc,char*argv[])
 {
+	//Handle of the pcap device/file
     pcap_t *handle;
+    //Mode of operation: file/device
     int mode;
     char errbuf[100] , *devname;
     char *fname;
     int data,full,half,syn,reset,result;
 
+    //If number of command line arguments are less than
+    // 4 then show user how to use this program.
     if(argc < 4)
     {
     	cout<<"Usage: ./Program Mode Options Your_IP\n";
     	cout<<"        Mode: 1 - File, 2 - Device\n";
     	cout<<"        Options: 1 - File name\n";
-    	cout<<"        Options: 2 - Interface name\n";
+    	cout<<"        Options: 2 - Interface name"
+    			"(E.g., eth0)\n";
     	exit(1);
     }
+    //Retrieve the mode from cmd-arg
     mode = atoi(argv[1]);
+
     if(mode == 1)
     {
-    	myip = argv[3];
-    	fname = argv[2];
+    	//Mode is file input
+    	myip = argv[3]; //Get user's IP
+    	fname = argv[2]; //Get pcap file name
+    	//Open the pcap file and get the handle
     	handle = pcap_open_offline(fname,errbuf);
+    	//Process the whole file until no packet
+    	// is left.
     	pcap_loop(handle ,-1, process_packet , NULL);
     }
     else if(mode == 2)
     {
-    	myip = argv[3];
-    	devname = argv[2];
-    	handle = pcap_open_live(devname , 65536 , 1 , 0 , errbuf);
+    	//Mode is device
+    	myip = argv[3]; //Get user's IP
+    	devname = argv[2]; //Get device interface name
+    	handle = pcap_open_live(devname,65536,1,0,errbuf);
+    	//If could not open the device then print error
+    	// and exit
     	if (handle == NULL)
 		{
-			fprintf(stderr, "Couldn't open device %s : %s\n" , devname , errbuf);
+			fprintf(stderr,"Couldn't open device %s : %s\n",
+					devname , errbuf);
 			exit(1);
 		}
+    	//Process 1000 packets from the interface
     	pcap_loop(handle, 1000, process_packet, NULL);
     }
+    //Print the potential threat ip list
     cout << "Potential threat:" << endl;
-	for(map<string,storage>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
+	for(map<string,storage>::iterator ite=logger.begin();
+			ite!=logger.end(); ++ite)
 	{
-		key = (*ii).first;
+		key = (*ite).first; //Get the IP
+		data = (*ite).second.data_transfer;
+		full = (*ite).second.full_open;
+		syn = (*ite).second.syn_counts;
+		half = (*ite).second.half_open;
+		reset = (*ite).second.reset;
 
-		data = (*ii).second.data_transfer;
-		full = (*ii).second.full_open;
-		syn = (*ii).second.syn_counts;
-		half = (*ii).second.half_open;
-		reset = (*ii).second.reset;
-
+		//Compute the potential threat score using the stored
+		// statistics
 		result = (full-data)+half+reset;
-
+		//If the final score is > threshold then print the
+		// IP as threat
 		if(result > THRESHOLD)
 		{
-			cout << "IP: " << key << " , Final score: " << result << endl;
-			//		cout << result << " " << key<<endl;
-					cout << "SYN: "<<syn <<" Data: "<<data<<
-							" Full: "<<full << " Half: "<<half<<
-							" Reset: "<<reset << endl;
+			cout << "IP: " << key << endl;
 		}
-//		else
-//		{
-//			cout << "IP: " << key << " , Final score: " << result << endl;
-//						//		cout << result << " " << key<<endl;
-//								cout << "SYN: "<<syn <<" Data: "<<data<<
-//										" Full: "<<full << " Half: "<<half<<
-//										" Reset: "<<reset << endl;
-//		}
 	}
-
     return 0;
 }
- 
-void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *buffer)
+
+/*
+ * Process Packet:
+ *    Processes the packet header and if the packet is of TCP
+ * then only it passes to other function for further processing
+ * otherwise just ignores the packet.
+ */
+void process_packet(u_char *args, const struct pcap_pkthdr *header,
+		const u_char *buffer)
 {
     int size = header->len;
-     
-    //Get the IP Header part of this packet , excluding the ethernet header
-    struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
+    //Get the IP Header part of this packet, excluding the Ethernet
+    // header
+    struct iphdr *iph = (struct iphdr*)(buffer +
+    		sizeof(struct ethhdr));
     ++total;
-    switch (iph->protocol) //Check the Protocol and do accordingly...
+    //Check the Protocol and do accordingly
+    switch (iph->protocol)
     {
-        case 6:  //TCP Protocol
+        case 6: //TCP Protocol
             ++tcp;
-            print_tcp_packet(buffer , size);
+            process_tcp_packet(buffer, size);
             break;
-         
-        default: //Some Other Protocol like ARP etc.
+        default: //Some Other Protocols
             ++others;
             break;
     }
 }
 
-void print_tcp_packet(const u_char * Buffer, int Size)
+/*
+ * Process TCP packet:
+ *    Processes the TCP packets. Using various flags, IP addresses
+ * and port addresses maintains the statistics about various hosts.
+ */
+void process_tcp_packet(const u_char * Buffer, int Size)
 {
     unsigned short iphdrlen;
     int destp,srcp;
     unsigned long seq;
-    struct iphdr *iph = (struct iphdr *)( Buffer  + sizeof(struct ethhdr) );
+    struct iphdr *iph = (struct iphdr *)(Buffer +
+    		sizeof(struct ethhdr) );
     iphdrlen = iph->ihl*4;
-    struct tcphdr *tcph=(struct tcphdr*)(Buffer + iphdrlen + sizeof(struct ethhdr));
-    int header_size =  sizeof(struct ethhdr) + iphdrlen + tcph->doff*4;
+    struct tcphdr *tcph=(struct tcphdr*)(Buffer +
+    		iphdrlen + sizeof(struct ethhdr));
+    int header_size =  sizeof(struct ethhdr) +
+    		iphdrlen + tcph->doff*4;
     struct ethhdr *eth = (struct ethhdr *)Buffer;
 
+    //Get the source IP address
     memset(&source, 0, sizeof(source));
 	source.sin_addr.s_addr = iph->saddr;
 
+	//Get the destination IP address
 	memset(&dest, 0, sizeof(dest));
 	dest.sin_addr.s_addr = iph->daddr;
 
+	//Get various flags
 	syn = (unsigned int)tcph->syn;
 	rst = (unsigned int)tcph->rst;
 	fin = (unsigned int)tcph->fin;
 	ack = (unsigned int)tcph->ack;
 
+	//Get the port numbers and sequence number
 	destp = ntohs(tcph->dest);
 	srcp = ntohs(tcph->source);
 	seq = ntohl((unsigned long)tcph->seq);
-//	cout<<seq<<endl;
-//	cout<<inet_ntoa(source.sin_addr) << " ";
-//	cout<<inet_ntoa(dest.sin_addr)<<endl;
-//	cout <<syn<<" "<<rst<<" "<<fin<<" "<<endl;
-//	cout << destp << " "<< srcp << "\n";
 
 	//Handle incoming SYN packets
-	if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && syn == 1 && ack == 0)
+	if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0
+			&& syn == 1 && ack == 0)
     {
+		//Source IP is the primary key
 		key = inet_ntoa(source.sin_addr);
+		//Destination port is the secondary key
 		key1 = destp;
+		//State = 1 indicating SYN is received
 		temp.state = 1;
 		logger[key].port[key1] = temp;
+		//Increment SYN count
 		logger[key].syn_counts++;
     }
 	//Handle outgoing SYN+ACK packets
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0 && syn == 1 && ack == 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0
+    		&& syn == 1 && ack == 1)
     {
+    	//Destination IP is the primary key
     	key = inet_ntoa(dest.sin_addr);
+    	//Source port is the secondary key
     	key1 = srcp;
+    	//If SYN was received earlier then only consider
     	if(logger[key].port[key1].state == 1)
     	{
+    		//State = 2 indicating SYN+ACK in opposite direction
 			temp.state = 2;
 			logger[key].port[key1] = temp;
     	}
     }
 	//Handle incoming ACK packets
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && ack == 1 && seq >= 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0
+    		&& ack == 1 && seq >= 1)
 	{
+    	//Source IP is the primary key
     	key = inet_ntoa(source.sin_addr);
+    	//Destination port is the secondary key
 		key1 = destp;
+		//If SYN+ACK was the last entry
 		if(logger[key].port[key1].state == 2)
 		{
+			//State = 3 indicating complete handshake
 			temp.state = 3;
 			logger[key].port[key1] = temp;
+			//Increment full open count
 			logger[key].full_open++;
 		}
 	}
 	//Handle incoming RST packets
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && rst == 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0
+    		&& rst == 1)
 	{
+    	//Source IP is the primary key
     	key = inet_ntoa(source.sin_addr);
+    	//Destination port is the secondary key
 		key1 = destp;
+		//If SYN+ACK was the last entry
 		if(logger[key].port[key1].state == 2)
 		{
+			//State = 4 indicating half open connection
 			temp.state = 4;
 			logger[key].port[key1] = temp;
+			//Increment half open count
 			logger[key].half_open++;
 		}
 	}
 	//Handle outgoing RST packets
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0 && rst == 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0
+    		&& rst == 1)
 	{
+    	//Destination IP is the primary key
     	key = inet_ntoa(dest.sin_addr);
+    	//Source port is the secondary key
 		key1 = srcp;
+		//If previous state was SYN or FIN
 		if(logger[key].port[key1].state == 1 ||
 				logger[key].port[key1].state == 6)
 		{
+			//State = 5 indicating RST
 			temp.state = 5;
 			logger[key].port[key1] = temp;
+			//Increment reset count
 			logger[key].reset++;
 		}
 	}
 	//Handle incoming data transfer
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && seq >= 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0
+    		&& ack == 1 && seq >= 1)
     {
+    	//Source IP is the primary key
     	key = inet_ntoa(source.sin_addr);
+    	//Destination port is the secondary key
 		key1 = destp;
+		//If previous state was full handshake
 		if(logger[key].port[key1].state == 3)
 		{
+			//State = 4 indicating data transfer
 			temp.state = 4;
 			logger[key].port[key1] = temp;
+			//Increment data transfer count
 			logger[key].data_transfer++;
 		}
     }
 	//Handle outgoing data transfer
-    else if(strcmp(inet_ntoa(dest.sin_addr),myip.c_str()) != 0  && ack == 1 && seq >= 1)
+    else if(strcmp(inet_ntoa(dest.sin_addr),myip.c_str()) != 0
+    		&& ack == 1 && seq >= 1)
 	{
+    	//Destination IP is the primary key
 		key = inet_ntoa(dest.sin_addr);
+		//Source port is the secondary key
 		key1 = srcp;
+		//If previous state was full handshake
 		if(logger[key].port[key1].state == 3)
 		{
+			//State = 4 indicating data transfer
 			temp.state = 4;
 			logger[key].port[key1] = temp;
+			//Increment data transfer count
 			logger[key].data_transfer++;
 		}
 	}
 	//Handle incoming FINs
-	else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && fin == 1 && ack == 0)
+	else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0
+			&& fin == 1 && ack == 0)
 	{
+		//Source IP is the primary key
 		key = inet_ntoa(source.sin_addr);
+		//Destination port is the secondary key
 		key1 = destp;
+		//State = 6 indicating FIN received
 		temp.state = 6;
 		logger[key].port[key1] = temp;
 	}
 }
-/*fprintf(logfile , "\n\n***********************TCP Packet*************************\n");
-	fprintf(logfile , "\n");
-	fprintf(logfile , "Ethernet Header\n");
-	fprintf(logfile , "   |-Destination Address : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_dest[0] , eth->h_dest[1] , eth->h_dest[2] , eth->h_dest[3] , eth->h_dest[4] , eth->h_dest[5] );
-	fprintf(logfile , "   |-Source Address      : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X \n", eth->h_source[0] , eth->h_source[1] , eth->h_source[2] , eth->h_source[3] , eth->h_source[4] , eth->h_source[5] );
-	fprintf(logfile , "   |-Protocol            : %u \n",(unsigned short)eth->h_proto);
-
-	fprintf(logfile , "\n");
-	fprintf(logfile , "IP Header\n");
-	fprintf(logfile , "   |-IP Version        : %d\n",(unsigned int)iph->version);
-	fprintf(logfile , "   |-IP Header Length  : %d DWORDS or %d Bytes\n",(unsigned int)iph->ihl,((unsigned int)(iph->ihl))*4);
-	fprintf(logfile , "   |-Type Of Service   : %d\n",(unsigned int)iph->tos);
-	fprintf(logfile , "   |-IP Total Length   : %d  Bytes(Size of Packet)\n",ntohs(iph->tot_len));
-	fprintf(logfile , "   |-Identification    : %d\n",ntohs(iph->id));
-	//fprintf(logfile , "   |-Reserved ZERO Field   : %d\n",(unsigned int)iphdr->ip_reserved_zero);
-	//fprintf(logfile , "   |-Dont Fragment Field   : %d\n",(unsigned int)iphdr->ip_dont_fragment);
-	//fprintf(logfile , "   |-More Fragment Field   : %d\n",(unsigned int)iphdr->ip_more_fragment);
-	fprintf(logfile , "   |-TTL      : %d\n",(unsigned int)iph->ttl);
-	fprintf(logfile , "   |-Protocol : %d\n",(unsigned int)iph->protocol);
-	fprintf(logfile , "   |-Checksum : %d\n",ntohs(iph->check));
-	fprintf(logfile , "   |-Source IP        : %s\n" , inet_ntoa(source.sin_addr) );
-	fprintf(logfile , "   |-Destination IP   : %s\n" , inet_ntoa(dest.sin_addr) );
-
-	fprintf(logfile , "\n");
-    fprintf(logfile , "TCP Header\n");
-    fprintf(logfile , "   |-Source Port      : %u\n",ntohs(tcph->source));
-    fprintf(logfile , "   |-Destination Port : %u\n",ntohs(tcph->dest));
-    fprintf(logfile , "   |-Sequence Number    : %u\n",ntohl(tcph->seq));
-    fprintf(logfile , "   |-Acknowledge Number : %u\n",ntohl(tcph->ack_seq));
-    fprintf(logfile , "   |-Header Length      : %d DWORDS or %d BYTES\n" ,(unsigned int)tcph->doff,(unsigned int)tcph->doff*4);
-    //fprintf(logfile , "   |-CWR Flag : %d\n",(unsigned int)tcph->cwr);
-    //fprintf(logfile , "   |-ECN Flag : %d\n",(unsigned int)tcph->ece);
-    fprintf(logfile , "   |-Urgent Flag          : %d\n",(unsigned int)tcph->urg);
-    fprintf(logfile , "   |-Acknowledgement Flag : %d\n",(unsigned int)tcph->ack);
-    fprintf(logfile , "   |-Push Flag            : %d\n",(unsigned int)tcph->psh);
-    fprintf(logfile , "   |-Reset Flag           : %d\n",(unsigned int)tcph->rst);
-    fprintf(logfile , "   |-Synchronise Flag     : %d\n",(unsigned int)tcph->syn);
-    fprintf(logfile , "   |-Finish Flag          : %d\n",(unsigned int)tcph->fin);
-    fprintf(logfile , "   |-Window         : %d\n",ntohs(tcph->window));
-    fprintf(logfile , "   |-Checksum       : %d\n",ntohs(tcph->check));
-    fprintf(logfile , "   |-Urgent Pointer : %d\n",tcph->urg_ptr);
-    fprintf(logfile , "\n");
-
-    fprintf(logfile , "\n###########################################################");*/
