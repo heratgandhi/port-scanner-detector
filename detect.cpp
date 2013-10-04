@@ -14,6 +14,8 @@
 
 using namespace std;
 
+#define THRESHOLD 10
+
 struct stat
 {
 	int state;
@@ -49,6 +51,8 @@ int main(int argc,char*argv[])
     int mode;
     char errbuf[100] , *devname;
     char *fname;
+    int data,full,half,syn,reset,result;
+
     if(argc < 4)
     {
     	cout<<"Usage: ./Program Mode Options Your_IP\n";
@@ -77,13 +81,26 @@ int main(int argc,char*argv[])
 		}
     	pcap_loop(handle, 1000, process_packet, NULL);
     }
-
+    cout << "Potential threat:" << endl;
 	for(map<string,storage>::iterator ii=logger.begin(); ii!=logger.end(); ++ii)
 	{
 		key = (*ii).first;
-		cout<<key<<endl;
-		cout<<(*ii).second.data_transfer<<" "<<(*ii).second.full_open<<" "<<(*ii).second.syn_counts<<" "<<
-				(*ii).second.half_open<<" "<<(*ii).second.reset<<endl;
+
+		data = (*ii).second.data_transfer;
+		full = (*ii).second.full_open;
+		syn = (*ii).second.syn_counts;
+		half = (*ii).second.half_open;
+		reset = (*ii).second.reset;
+
+		result = (full-data)+half+reset;
+//		cout << result << " " << key<<endl;
+//		cout << "SYN: "<<syn <<"Data: "<<data<<
+//				"Full: "<<full << "Half: "<<half<<
+//				"Reset: "<<reset << endl;
+		if(result > THRESHOLD)
+		{
+			cout << "IP: " << key << " , Final score: " << result << endl;
+		}
 	}
 
     return 0;
@@ -134,10 +151,10 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 	destp = ntohs(tcph->dest);
 	srcp = ntohs(tcph->source);
 	seq = ntohl(tcph->seq);
-	//cout<<inet_ntoa(source.sin_addr) << " ";
-	//cout<<inet_ntoa(dest.sin_addr)<<endl;
-	//cout <<syn<<" "<<rst<<" "<<fin<<" "<<endl;
-	//cout << destp << " "<< srcp << "\n";
+//	cout<<inet_ntoa(source.sin_addr) << " ";
+//	cout<<inet_ntoa(dest.sin_addr)<<endl;
+//	cout <<syn<<" "<<rst<<" "<<fin<<" "<<endl;
+//	cout << destp << " "<< srcp << "\n";
 
 	//Handle incoming SYN packets
 	if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && syn == 1 && ack == 0)
@@ -188,15 +205,12 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 	{
     	key = inet_ntoa(dest.sin_addr);
 		key1 = srcp;
-		if(logger[key].port[key1].state == 1)
-		{
-			temp.state = 3;
-			logger[key].port[key1] = temp;
-			logger[key].reset++;
-		}
+		temp.state = 3;
+		logger[key].port[key1] = temp;
+		logger[key].reset++;
 	}
 	//Handle data transfer
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && seq > 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && seq >= 1)
     {
     	key = inet_ntoa(source.sin_addr);
 		key1 = destp;
