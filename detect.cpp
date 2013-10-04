@@ -25,6 +25,7 @@ struct storage
 	int half_open;
 	int reset;
 	int data_transfer;
+	int syn_counts;
 	map<int,stat> port;
 };
 
@@ -81,7 +82,7 @@ int main(int argc,char*argv[])
 	{
 		key = (*ii).first;
 		cout<<key<<endl;
-		cout<<(*ii).second.data_transfer<<" "<<(*ii).second.full_open<<" "<<
+		cout<<(*ii).second.data_transfer<<" "<<(*ii).second.full_open<<" "<<(*ii).second.syn_counts<<" "<<
 				(*ii).second.half_open<<" "<<(*ii).second.reset<<endl;
 	}
 
@@ -112,6 +113,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 {
     unsigned short iphdrlen;
     int destp,srcp;
+    int seq;
     struct iphdr *iph = (struct iphdr *)( Buffer  + sizeof(struct ethhdr) );
     iphdrlen = iph->ihl*4;
     struct tcphdr *tcph=(struct tcphdr*)(Buffer + iphdrlen + sizeof(struct ethhdr));
@@ -131,7 +133,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 
 	destp = ntohs(tcph->dest);
 	srcp = ntohs(tcph->source);
-
+	seq = ntohl(tcph->seq);
 	//cout<<inet_ntoa(source.sin_addr) << " ";
 	//cout<<inet_ntoa(dest.sin_addr)<<endl;
 	//cout <<syn<<" "<<rst<<" "<<fin<<" "<<endl;
@@ -144,6 +146,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 		key1 = destp;
 		temp.state = 1;
 		logger[key].port[key1] = temp;
+		logger[key].syn_counts++;
     }
 	//Handle outgoing SYN+ACK packets
     else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0 && syn == 1 && ack == 1)
@@ -157,7 +160,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
     	}
     }
 	//Handle incoming ACK packets
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && ack == 1 && tcph->seq == 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && ack == 1 && seq >= 1)
 	{
     	key = inet_ntoa(source.sin_addr);
 		key1 = destp;
@@ -171,7 +174,6 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 	//Handle incoming RST packets
     else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0 && rst == 1)
 	{
-    	//cout<<"incoming rst\n";
     	key = inet_ntoa(source.sin_addr);
 		key1 = destp;
 		if(logger[key].port[key1].state == 2)
@@ -179,13 +181,11 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 			temp.state = 4;
 			logger[key].port[key1] = temp;
 			logger[key].half_open++;
-			//cout<<"Increment\n";
 		}
 	}
 	//Handle outgoing RST packets
     else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) == 0 && rst == 1)
 	{
-    	//cout<<"outgoing rst\n";
     	key = inet_ntoa(dest.sin_addr);
 		key1 = srcp;
 		if(logger[key].port[key1].state == 1)
@@ -193,12 +193,10 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 			temp.state = 3;
 			logger[key].port[key1] = temp;
 			logger[key].reset++;
-			//cout<<key<<" Increment \n";
-			//cout<<key1<<" Increment \n";
 		}
 	}
 	//Handle data transfer
-    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && tcph->seq > 1)
+    else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && seq > 1)
     {
     	key = inet_ntoa(source.sin_addr);
 		key1 = destp;
