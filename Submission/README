@@ -1,0 +1,114 @@
+Project: Portscan detector
+
+---------------------------------------
+
+-> Which ports were open?
+Open ports:
+Starting Nmap 6.00 ( http://nmap.org ) at 2013-09-29 14:13 EDT
+Nmap scan report for localhost (127.0.0.1)
+Host is up (0.0000050s latency).
+Not shown: 999 closed ports
+PORT    STATE SERVICE
+631/tcp open  ipp
+
+Nmap done: 1 IP address (1 host up) scanned in 0.09 seconds
+
+Port 631 is the port for CUPS, the printer driver software. 
+This is quite usual as it comes with the default installation. 
+If you configure your computer for sharing printers, port 631 will 
+always be open to the other computers, so they can use the printer.
+
+-> Maximum consecutive ports that can be scanned without triggering the
+port scan detector:
+While using, nmap -sS option maximum 10 ports can be scanned without 
+triggering my port scan detector as my threshold is set to 10. That 
+value is lower for the -sT option as t option sends many packets to 
+check a port.
+
+---------------------------------------
+
+Design:
+- Data Structures:
+	I have kept a hashmap for keeping track of packet statistics. The 
+	hashmap uses source ip as its key (client ip). The value is number 
+	of full open connections, number of half open connections, 
+	number of reset connections, number of data transfers and another 
+	map which uses destination port (server port) as its key and the 
+	value of that map is stat structure which keeps track of the state 
+	of the connection between client ip and server port. 
+	The state is as follows:
+	* 1 - SYN received
+	* 2 - SYN+ACK received
+	* 3 - ACK - complete handshake
+	* 4 - ACK with some data - data transfer
+	* 5 - RST sent
+	* 6 - FIN received
+	* 7 - RST received
+
+- Input:
+	I am taking following inputs from user:
+	Mode: 
+		1 - Read packets from file
+		2 - Read packets from the device
+	Options:
+		For mode 1 : File name
+		For mode 2 : Name of the interface, e.g.: eth0
+	IP address of the user: used for pcap file or on the interface
+	Number of packets to be processed
+
+- Algorithm:
+	For each packet:
+	1. Read the IP header.
+	2. If protocol is TCP then process the packet;
+		otherwise drop the packet.
+	3. Check if one of the following situations exists:
+		- If there is an incoming SYN
+			Primary key: Source IP
+			Secondary key: Destination port
+			Make the state inside the hashmap as 1. Increment the SYN
+			count.
+		
+		- If there is an outgoing SYN+ACK
+			Primary key: Destination IP
+			Secondary key: Source port
+			Make the state inside the hashmap as 2 if the previous state
+			was 1.
+		
+		- If there is an incoming ACK
+			Primary key: Source IP
+			Secondary key: Destination port
+			Make the state inside the hashmap as 3 if previous state was
+			 2. Increment the complete connection count.
+		
+		- If there is an incoming RST
+			Primary key: Source IP
+			Secondary key: Destination port
+			Make the state inside the hashmap as 7 if the previous state
+			was 2. Increment the half open count.
+			
+		- If there is an outgoing RST
+			Primary key: Destination IP
+			Secondary key: Source port
+			If the previous state was 1 or 6 the make the state as 5 and
+			increment the reset connection count.
+			
+		- If there is an incoming data packet
+			Primary key: Source IP
+			Secondary key: Destination port
+			If previous state was 3 the make the state as 3. Increment 
+			the data transfer count.
+			
+		- If there is an outgoing data packet
+			Primary key: Destination IP
+			Secondary key: Source port
+			If previous state was 3 the make the state as 3. Increment 
+			the data transfer count.
+			
+		- If there is an incoming FIN
+			Primary key: Source IP
+			Secondary key: Destination port
+			Make the state as 6.
+			
+	4. Print the threat list based on if (complete connection-
+	   data transfer) + half connections + reset connections > 
+	   threshold.
