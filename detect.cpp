@@ -50,6 +50,7 @@ int key1;
 stat temp;
 int syn,rst,ack,fin;
 string myip = "192.168.48.146";
+int print_alert = 0;
  
 int main(int argc,char*argv[])
 {
@@ -59,13 +60,14 @@ int main(int argc,char*argv[])
     int mode;
     char errbuf[100] , *devname;
     char *fname;
+    int packets;
     int data,full,half,syn,reset,result;
 
     //If number of command line arguments are less than
-    // 4 then show user how to use this program.
-    if(argc < 4)
+    // 5 then show user how to use this program.
+    if(argc < 5)
     {
-    	cout<<"Usage: ./Program Mode Options Your_IP\n";
+    	cout<<"Usage: ./Program Mode Options Your_IP Number_of_packets\n";
     	cout<<"        Mode: 1 - File, 2 - Device\n";
     	cout<<"        Options: 1 - File name\n";
     	cout<<"        Options: 2 - Interface name"
@@ -82,9 +84,11 @@ int main(int argc,char*argv[])
     	fname = argv[2]; //Get pcap file name
     	//Open the pcap file and get the handle
     	handle = pcap_open_offline(fname,errbuf);
+    	//Get the number of packets to be processed
+    	packets = atoi(argv[4]);
     	//Process the whole file until no packet
     	// is left.
-    	pcap_loop(handle ,-1, process_packet , NULL);
+    	pcap_loop(handle ,packets, process_packet , NULL);
     }
     else if(mode == 2)
     {
@@ -100,8 +104,10 @@ int main(int argc,char*argv[])
 					devname , errbuf);
 			exit(1);
 		}
+    	//Get the number of packets to be processed
+		packets = atoi(argv[4]);
     	//Process 1000 packets from the interface
-    	pcap_loop(handle, 1000, process_packet, NULL);
+    	pcap_loop(handle, packets, process_packet, NULL);
     }
     //Print the potential threat ip list
     cout << "Potential threat:" << endl;
@@ -123,9 +129,28 @@ int main(int argc,char*argv[])
 		if(result > THRESHOLD)
 		{
 			cout << "IP: " << key << endl;
+			cout << "   Number of Half-open connections: "<<half<<endl;
+			cout << "   Number of complete connections: "<<full<<endl;
+			cout << "   Number of reset connections: " <<reset<<endl;
 		}
 	}
     return 0;
+}
+
+/*
+ * Print Statistics:
+ * 		Print the potential threats here.
+ * 		This is a running list.
+ */
+void print_statistics(string str)
+{
+	//Check if crossed threshold
+	if(((logger[str].full_open - logger[str].data_transfer)
+			+ logger[str].half_open + logger[str].reset)
+			> THRESHOLD)
+	{
+		cout << "Alert! IP: " << str << endl;
+	}
 }
 
 /*
@@ -163,9 +188,10 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header,
  */
 void process_tcp_packet(const u_char * Buffer, int Size)
 {
-    unsigned short iphdrlen;
+	unsigned short iphdrlen;
     int destp,srcp;
     unsigned long seq;
+    int flag = 0;
     struct iphdr *iph = (struct iphdr *)(Buffer +
     		sizeof(struct ethhdr) );
     iphdrlen = iph->ihl*4;
@@ -240,6 +266,7 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].port[key1] = temp;
 			//Increment full open count
 			logger[key].full_open++;
+			flag = 1;
 		}
 	}
 	//Handle incoming RST packets
@@ -253,11 +280,12 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 		//If SYN+ACK was the last entry
 		if(logger[key].port[key1].state == 2)
 		{
-			//State = 4 indicating half open connection
-			temp.state = 4;
+			//State = 7 indicating half open connection
+			temp.state = 7;
 			logger[key].port[key1] = temp;
 			//Increment half open count
 			logger[key].half_open++;
+			flag = 1;
 		}
 	}
 	//Handle outgoing RST packets
@@ -277,6 +305,7 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].port[key1] = temp;
 			//Increment reset count
 			logger[key].reset++;
+			flag = 1;
 		}
 	}
 	//Handle incoming data transfer
@@ -295,6 +324,7 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].port[key1] = temp;
 			//Increment data transfer count
 			logger[key].data_transfer++;
+			flag = 1;
 		}
     }
 	//Handle outgoing data transfer
@@ -313,6 +343,7 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].port[key1] = temp;
 			//Increment data transfer count
 			logger[key].data_transfer++;
+			flag = 1;
 		}
 	}
 	//Handle incoming FINs
@@ -327,4 +358,10 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 		temp.state = 6;
 		logger[key].port[key1] = temp;
 	}
+	//Print alert for debugging
+	if(flag == 1 && print_alert%150 == 0)
+	{
+		print_statistics(key);
+	}
+	print_alert++;
 }
