@@ -93,14 +93,23 @@ int main(int argc,char*argv[])
 		reset = (*ii).second.reset;
 
 		result = (full-data)+half+reset;
-//		cout << result << " " << key<<endl;
-//		cout << "SYN: "<<syn <<"Data: "<<data<<
-//				"Full: "<<full << "Half: "<<half<<
-//				"Reset: "<<reset << endl;
+
 		if(result > THRESHOLD)
 		{
 			cout << "IP: " << key << " , Final score: " << result << endl;
+			//		cout << result << " " << key<<endl;
+					cout << "SYN: "<<syn <<" Data: "<<data<<
+							" Full: "<<full << " Half: "<<half<<
+							" Reset: "<<reset << endl;
 		}
+//		else
+//		{
+//			cout << "IP: " << key << " , Final score: " << result << endl;
+//						//		cout << result << " " << key<<endl;
+//								cout << "SYN: "<<syn <<" Data: "<<data<<
+//										" Full: "<<full << " Half: "<<half<<
+//										" Reset: "<<reset << endl;
+//		}
 	}
 
     return 0;
@@ -130,7 +139,7 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 {
     unsigned short iphdrlen;
     int destp,srcp;
-    int seq;
+    unsigned long seq;
     struct iphdr *iph = (struct iphdr *)( Buffer  + sizeof(struct ethhdr) );
     iphdrlen = iph->ihl*4;
     struct tcphdr *tcph=(struct tcphdr*)(Buffer + iphdrlen + sizeof(struct ethhdr));
@@ -150,7 +159,8 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 
 	destp = ntohs(tcph->dest);
 	srcp = ntohs(tcph->source);
-	seq = ntohl(tcph->seq);
+	seq = ntohl((unsigned long)tcph->seq);
+//	cout<<seq<<endl;
 //	cout<<inet_ntoa(source.sin_addr) << " ";
 //	cout<<inet_ntoa(dest.sin_addr)<<endl;
 //	cout <<syn<<" "<<rst<<" "<<fin<<" "<<endl;
@@ -205,11 +215,15 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 	{
     	key = inet_ntoa(dest.sin_addr);
 		key1 = srcp;
-		temp.state = 3;
-		logger[key].port[key1] = temp;
-		logger[key].reset++;
+		if(logger[key].port[key1].state == 1 ||
+				logger[key].port[key1].state == 6)
+		{
+			temp.state = 5;
+			logger[key].port[key1] = temp;
+			logger[key].reset++;
+		}
 	}
-	//Handle data transfer
+	//Handle incoming data transfer
     else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && ack == 1 && seq >= 1)
     {
     	key = inet_ntoa(source.sin_addr);
@@ -221,6 +235,26 @@ void print_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].data_transfer++;
 		}
     }
+	//Handle outgoing data transfer
+    else if(strcmp(inet_ntoa(dest.sin_addr),myip.c_str()) != 0  && ack == 1 && seq >= 1)
+	{
+		key = inet_ntoa(dest.sin_addr);
+		key1 = srcp;
+		if(logger[key].port[key1].state == 3)
+		{
+			temp.state = 4;
+			logger[key].port[key1] = temp;
+			logger[key].data_transfer++;
+		}
+	}
+	//Handle incoming FINs
+	else if(strcmp(inet_ntoa(source.sin_addr),myip.c_str()) != 0  && fin == 1 && ack == 0)
+	{
+		key = inet_ntoa(source.sin_addr);
+		key1 = destp;
+		temp.state = 6;
+		logger[key].port[key1] = temp;
+	}
 }
 /*fprintf(logfile , "\n\n***********************TCP Packet*************************\n");
 	fprintf(logfile , "\n");
