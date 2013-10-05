@@ -248,6 +248,8 @@ void process_tcp_packet(const u_char * Buffer, int Size)
     		//State = 2 indicating SYN+ACK in opposite direction
 			temp.state = 2;
 			logger[key].port[key1] = temp;
+			//Increment half open count
+			//logger[key].half_open++;
     	}
     }
 	//Handle incoming ACK packets
@@ -266,6 +268,8 @@ void process_tcp_packet(const u_char * Buffer, int Size)
 			logger[key].port[key1] = temp;
 			//Increment full open count
 			logger[key].full_open++;
+			//Increment half open count
+			//logger[key].half_open--;
 			flag = 1;
 		}
 	}

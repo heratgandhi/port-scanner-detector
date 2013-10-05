@@ -112,3 +112,14 @@ Design:
 	4. Print the threat list based on if (complete connection-
 	   data transfer) + half connections + reset connections > 
 	   threshold.
+
+---------------------------------------
+
+Testing:
+	- I used 12 hours log as the input file and made sure that my 
+	detector is not triggering the scanning from any ip because it is 
+	the normal browsing history.
+	- I used the VMware for the coding. So to scan the VMware, I use
+	nmap on the windows that is my host and scan the VMware machine. 
+	While nmap is scanning, I have kept the port scanner code running so
+	that it detects this activity as an illegal behavior.
