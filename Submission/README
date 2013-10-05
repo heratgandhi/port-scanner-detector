@@ -45,6 +45,37 @@ Design:
 	* 6 - FIN received
 	* 7 - RST received
 
+- Logic:
+	How did I...
+	- Find -sS attacks?:
+	When the attacker does -sS scan using nmap, it will send a lot of 
+	SYN packets. If a port is open then victim will reply with SYN+ACK 
+	and if the port is closed then it will reply with RST. And the 
+	attacker will send the RST for the SYN+ACK. So I keep track of these
+	events as explained in the algorithm below. In the end, I find the
+	total rougue syns, total half open connections and the total reset
+	connections. If the value is greater than threshold then it is a 
+	scanner.
+	
+	- Find -sT attacks?
+	When the attacker does -sT scan using nmap, it will send a lot of 
+	SYN packets. If a port is open then victim will reply with SYN+ACK 
+	and if the port is closed then it will reply with RST. And the 
+	attacker will send the ACK for the SYN+ACK. But after this, there 
+	won't be any data transfer. So I keep track of these
+	events as explained in the algorithm below. In the end, I find the
+	total rougue complete connections, total half open connections and 
+	the total reset connections. If the value is greater than threshold 
+	then it is a scanner activity.
+	
+	- Find -sF attacks?
+	When the attacker does -sF scan using nmap, it will send a lot of 
+	FIN packets. If a port is open then victim will just drop the packet 
+	and if the port is closed then it will reply with RST. So I keep 
+	track of these events as explained in the algorithm below. 
+	In the end, I find the total reset connections. If the value is 
+	greater than threshold then it is a scanner.	
+
 - Input:
 	I am taking following inputs from user:
 	Mode: 
